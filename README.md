@@ -1,2 +1,2 @@
 # SDC_project13
-Udacity course - SDC - project 13 - final
+this repository contains the images extracted from the simulator
