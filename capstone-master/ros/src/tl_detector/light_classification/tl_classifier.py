@@ -22,8 +22,8 @@ class TLClassifier(object):
 	def __init__(self):
 				
 		"""
-        Creates tf session and loads calculation graph
-        """
+		Creates tf session and loads calculation graph
+		"""
 		# init default variables		
 		
 		tl_detector_dir =os.path.dirname(os.path.abspath(__file__))
@@ -53,7 +53,6 @@ class TLClassifier(object):
 	  	self.output_operation = graph.get_operation_by_name(output_name);
 
 		'''
-		'''
 		# load classifier
 		self.model_path= model_path
 		# load graph
@@ -62,8 +61,7 @@ class TLClassifier(object):
 		self.graph = _load_graph(self.model_path, self.config)
 		# TF session
 		self.sess = tf.Session(graph=self.graph, config=self.config)
-		# 
-		'''      
+		#      
 		pass
 		'''
 		
