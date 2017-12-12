@@ -1,99 +1,86 @@
-from styx_msgs.msg import TrafficLight
-
-import tensorflow as tf
-import os
-import cv2
-import numpy as np
+from styx_msgs.msg import TrafficLight #*************************************
 import rospy
-import time
+import argparse
+import sys
+
+import numpy as np
+import tensorflow as tf
+
+def load_graph(model_file):
+  graph = tf.Graph()
+  graph_def = tf.GraphDef()
+
+  with open(model_file, "rb") as f:
+    graph_def.ParseFromString(f.read())
+  with graph.as_default():
+    tf.import_graph_def(graph_def)
+
+  return graph
+
+def load_labels(label_file):
+  label = []
+  proto_as_ascii_lines = tf.gfile.GFile(label_file).readlines()
+  for l in proto_as_ascii_lines:
+    label.append(l.rstrip())
+  return label
+
+def read_tensor_from_image(image, input_height=224, input_width=224,
+                input_mean=0, input_std=255):
+  
+  float_caster = tf.cast(image, tf.float32)
+  dims_expander = tf.expand_dims(float_caster, 0);
+  resized = tf.image.resize_bilinear(dims_expander, [input_height, input_width])
+  normalized = tf.divide(tf.subtract(resized, [input_mean]), [input_std])
+  sess = tf.Session()
+  result = sess.run(normalized)
+
+  return result
 
 class TLClassifier(object):
-
-	def load_graph(model_file):
-  		graph = tf.Graph()
-  		graph_def = tf.GraphDef()
-
-  		with open(model_file, "rb") as f:
-    		graph_def.ParseFromString(f.read())
-  		with graph.as_default():
-    		tf.import_graph_def(graph_def)
-  		return graph
-	
-	def __init__(self):
-				
-		"""
-		Creates tf session and loads calculation graph
-		"""
-		# init default variables		
+	def __init__(self, carla_run):
+		self.carla_run = carla_run
 		
-		tl_detector_dir =os.path.dirname(os.path.abspath(__file__))
-		model_dir = os.path.join(tl_detector_dir,'models')
-		self.model_file=os.path.join(model_dir,'retrained_graph.pb')
-
-		label_path=os.path.join(model_dir,'image_labels.txt')
-		self.label_file = label_path
-	  	self.input_height = 224
-	  	self.input_width = 224
-	  	self.input_mean = 128
-	  	self.input_std = 128
-	  	self.input_layer = "input"
-	  	self.output_layer = "final_result"
-
-        # load graph
-		self.graph = load_graph(self.model_file)
-
-		# create session
-		self.config = tf.ConfigProto()
-		self.sess = tf.Session(graph=self.graph, config=self.config)	
+		model_path="models/sim/retrained_graph.pb"
+		labels_path="models/sim/image_labels.txt"
+		if self.carla_run:
+			model_path="models/carla/output_graph.pb"
+			labels_path="models/carla/output_labels.txt"
 		
-		# inputs/outputs
-	  	input_name = "import/" + self.input_layer
-	  	output_name = "import/" + self.output_layer
-	  	self.input_operation = graph.get_operation_by_name(input_name);
-	  	self.output_operation = graph.get_operation_by_name(output_name);
+		self.labels=load_labels(labels_path)		
+		self.graph = load_graph(model_path)
+		rospy.loginfo("Graph %s loaded", model_path)
 
-		'''
-		# load classifier
-		self.model_path= model_path
-		# load graph
-		self.config = tf.ConfigProto()
-		# **** may need to precise for GPU or CPU
-		self.graph = _load_graph(self.model_path, self.config)
-		# TF session
-		self.sess = tf.Session(graph=self.graph, config=self.config)
-		#      
-		pass
-		'''
+	def get_classification(self, image):
+		"""Determines the color of the traffic light in the image
 		
+		Args:
+		    image (cv::Mat): image containing the traffic light
 
-    def get_classification(self, image):
-        """Determines the color of the traffic light in the image
-        Args:
-            image (cv::Mat): image containing the traffic light
-        Returns:
+		Returns:
             int: ID of traffic light color (specified in styx_msgs/TrafficLight)
         """
+		#TODO implement light color prediction
+		t = read_tensor_from_image(image)
 		
-		# pre-process image
-		float_caster = tf.cast(image, tf.float32)
-  		dims_expander = tf.expand_dims(float_caster, 0);
-  		resized = tf.image.resize_bilinear(dims_expander, [self.input_height, self.input_width])
-  		normalized = tf.divide(tf.subtract(resized, [self.input_mean]), [self.input_std])
-  		self.resized_t_img = self.sess.run(normalized)
-				
-		# run TF prediction		
-		#start = time.time()
-		results = sess.run(self.output_operation.outputs[0],
-                      {self.input_operation.outputs[0]: self.resized_t_img})
-		#end=time.time()
+		input_name = "import/input"
+		output_name = "import/final_result"
+		input_operation = self.graph.get_operation_by_name(input_name);
+		output_operation = self.graph.get_operation_by_name(output_name);
+		
+		with tf.Session(graph=self.graph) as sess:
+			results = sess.run(output_operation.outputs[0],
+                          {input_operation.outputs[0]: t})
+		
 		results = np.squeeze(results)
+		top_k = results.argsort()[-5:][::-1]
 		
-		if result[0]>=result[1]:
-			return TrafficLight.RED
-		else:
-			return TrafficLight.GREEN
-
-		# note: first label is 'stop', second label is 'go'
-        return TrafficLight.UNKNOWN
+		ret = TrafficLight.UNKNOWN
+		first = top_k[0]
 		
-		#return TrafficLight.RED#GREEN
+		if self.labels[first] == "stop":
+			ret = TrafficLight.RED
+		elif self.labels[first] == "go":
+			ret = TrafficLight.GREEN
+				
+		rospy.loginfo("The detected signal is %s", self.labels[first])
+		return ret
